@@ -1,127 +1,175 @@
-import numpy as np
+#!/usr/bin/env python3
+"""
+regal.py
+
+Example REGAL pipeline adapted for TWO separate graphs.
+
+Usage:
+  python regal.py \
+      --input1 path/to/male_connectome_graph.txt \
+      --input2 path/to/female_connectome_graph.txt \
+      --output1 path/to/male_emb.npy \
+      --output2 path/to/female_emb.npy \
+      --untillayer 2 \
+      --alpha 0.01 \
+      --k 10 \
+      --align
+
+Steps:
+  1) Reads two edgelist files (graph1, graph2).
+  2) Learns xNetMF embeddings for each graph separately.
+  3) Saves each embedding to a .npy file (e.g., male_emb.npy, female_emb.npy).
+  4) Optionally, if --align is set, computes an alignment matrix between the two embeddings.
+"""
+
 import argparse
+import numpy as np
 import networkx as nx
 import time
-import os
 import sys
-try: import cPickle as pickle 
-except ImportError:
-	import pickle
 from scipy.sparse import csr_matrix
 
+# These imports assume your local REGAL modules are in the same directory
 import xnetmf
 from config import *
 from alignments import *
 
 def parse_args():
-	parser = argparse.ArgumentParser(description="Run REGAL.")
+    parser = argparse.ArgumentParser(description="Run REGAL on two separate graphs.")
 
-	parser.add_argument('--input', nargs='?', default='data/arenas_combined_edges.txt', help="Edgelist of combined input graph")
+    # Graph inputs
+    parser.add_argument('--input1', required=True, help="Edgelist for Graph 1 (e.g., male)")
+    parser.add_argument('--input2', required=True, help="Edgelist for Graph 2 (e.g., female)")
 
-	parser.add_argument('--output', nargs='?', default='emb/arenas990-1.emb',
-	                    help='Embeddings path')
+    # Output embedding paths
+    parser.add_argument('--output1', required=True, help="Where to save Graph 1's embedding (.npy)")
+    parser.add_argument('--output2', required=True, help="Where to save Graph 2's embedding (.npy)")
 
-	parser.add_argument('--attributes', nargs='?', default=None,
-	                    help='File with saved numpy matrix of node attributes, or int of number of attributes to synthetically generate.  Default is 5 synthetic.')
+    # Node attributes (optional)
+    parser.add_argument('--attributes', nargs='?', default=None,
+                        help="Path to .npy file of node attributes, or int for synthetic attributes.")
+    parser.add_argument('--attrvals', type=int, default=2,
+                        help="Number of attribute values if synthetic attributes are generated.")
 
-	parser.add_argument('--attrvals', type=int, default=2,
-	                    help='Number of attribute values. Only used if synthetic attributes are generated')
+    # xNetMF/REGAL parameters
+    parser.add_argument('--dimensions', type=int, default=128,
+                        help="Number of embedding dimensions. Default=128.")
+    parser.add_argument('--k', type=int, default=10,
+                        help="Controls # of landmarks (default=10).")
+    parser.add_argument('--untillayer', type=int, default=2,
+                        help="Max layer for xNetMF (default=2). 0 => no limit.")
+    parser.add_argument('--alpha', type=float, default=0.01,
+                        help="Discount factor for further layers (default=0.01).")
+    parser.add_argument('--gammastruc', type=float, default=1,
+                        help="Weight on structural similarity (default=1).")
+    parser.add_argument('--gammaattr', type=float, default=1,
+                        help="Weight on attribute similarity (default=1).")
+    parser.add_argument('--numtop', type=int, default=0,
+                        help="KD-tree top similarities. 0 => compute all pairwise.")
+    parser.add_argument('--buckets', type=float, default=2,
+                        help="Base of log for degree binning (default=2).")
 
+    # Alignment flag
+    parser.add_argument('--align', action='store_true',
+                        help="If set, compute an alignment matrix between the two embeddings.")
 
-	parser.add_argument('--dimensions', type=int, default=128,
-	                    help='Number of dimensions. Default is 128.')
+    return parser.parse_args()
 
-	parser.add_argument('--k', type=int, default=10,
-	                    help='Controls of landmarks to sample. Default is 10.')
+def learn_representations_for_edgelist(edgelist_file, rep_method, attributes=None):
+    """
+    Reads an edgelist file, constructs a Graph object, and runs xNetMF to get the embedding.
+    """
+    print(f"\n=== Reading edgelist from: {edgelist_file} ===")
+    # For directed/weighted graphs, adjust the read_edgelist call, e.g.:
+    # nx_graph = nx.read_edgelist(edgelist_file, nodetype=int, data=[('weight', float)], create_using=nx.DiGraph())
+    nx_graph = nx.read_edgelist(edgelist_file, nodetype=int, comments="%")
+    print("  Graph has", nx_graph.number_of_nodes(), "nodes and", nx_graph.number_of_edges(), "edges")
 
-	parser.add_argument('--untillayer', type=int, default=2,
-                    	help='Calculation until the layer for xNetMF.')
-	parser.add_argument('--alpha', type=float, default = 0.01, help = "Discount factor for further layers")
-	parser.add_argument('--gammastruc', type=float, default = 1, help = "Weight on structural similarity")
-	parser.add_argument('--gammaattr', type=float, default = 1, help = "Weight on attribute similarity")
-	parser.add_argument('--numtop', type=int, default=10,help="Number of top similarities to compute with kd-tree.  If 0, computes all pairwise similarities.")
-	parser.add_argument('--buckets', default=2, type=float, help="base of log for degree (node feature) binning")
-	return parser.parse_args()
+    # Build adjacency
+    node_list = sorted(nx_graph.nodes())  # ensures consistent ordering
+    adj = nx.adjacency_matrix(nx_graph, nodelist=node_list)
+    print("  Constructed adjacency matrix shape:", adj.shape)
+
+    # Create a Graph object as used by xNetMF
+    graph_obj = Graph(adj, node_attributes=attributes)
+
+    # Run xNetMF
+    print("  Running xNetMF get_representations...")
+    embedding = xnetmf.get_representations(graph_obj, rep_method, verbose=True)
+    print("  xNetMF finished. Embedding shape:", embedding.shape)
+    return embedding
 
 def main(args):
-	dataset_name = args.output.split("/")
-	if len(dataset_name) == 1:
-		dataset_name = dataset_name[-1].split(".")[0]
-	else:
-		dataset_name = dataset_name[-2]
+    # Handle attributes if provided
+    if args.attributes is not None:
+        # Could be a .npy file or an int specifying synthetic attribute dimension
+        try:
+            attributes = np.load(args.attributes)
+            print("Loaded external attributes of shape:", attributes.shape)
+        except ValueError:
+            # e.g. if it's an int, you'd generate synthetic attributes
+            # (not implemented in this minimal example)
+            attributes = None
+    else:
+        attributes = None
 
-	#Get true alignments
-	#true_alignments_fname = args.input.split("_")[0] + "_edges-mapping-permutation.txt" #can be changed if desired
-	#print("true alignments file: ", true_alignments_fname)
-	true_alignments_fname = None
-	true_alignments = None
-	#if os.path.exists(true_alignments_fname):
-	#	with open(true_alignments_fname, "rb") as true_alignments_file:
-	#		try:
-	#			true_alignments = pickle.load(true_alignments_file)
-	#		except:
-	#			true_alignments = pickle.load(true_alignments_file, encoding = "latin1")
+    # Create the RepMethod config
+    max_layer = args.untillayer if args.untillayer != 0 else None
+    if args.buckets == 1:
+        buckets = None
+    else:
+        buckets = args.buckets
 
-	#Load in attributes if desired (assumes they are numpy array)
-	if args.attributes is not None:
-		args.attributes = np.load(args.attributes) #load vector of attributes in from file
-		print(args.attributes.shape)
+    rep_method = RepMethod(
+        max_layer=max_layer,
+        alpha=args.alpha,
+        k=args.k,
+        num_buckets=buckets,
+        normalize=True,      # typically True for REGAL
+        gammastruc=args.gammastruc,
+        gammaattr=args.gammaattr
+    )
+    print("\n=== REGAL/xNetMF Parameters ===")
+    print("  max_layer =", max_layer)
+    print("  alpha     =", args.alpha)
+    print("  k         =", args.k)
+    print("  buckets   =", buckets)
+    print("  gammastruc=", args.gammastruc)
+    print("  gammaattr =", args.gammaattr)
 
-	#Learn embeddings and save to output
-	print("learning representations...")
-	before_rep = time.time()
-	embed = learn_representations(args)
-	print(embed)
-	after_rep = time.time()
-	print("Learned representations in %f seconds" % (after_rep - before_rep))
+    # Learn embeddings for each graph
+    print("\n=== Learning Embeddings for Graph 1 ===")
+    start_time_1 = time.time()
+    emb1 = learn_representations_for_edgelist(args.input1, rep_method, attributes)
+    np.save(args.output1, emb1)
+    print(f"  Saved Graph 1 embedding to {args.output1}")
+    elapsed1 = time.time() - start_time_1
+    print(f"  Time for Graph 1 embedding: {elapsed1:.2f} seconds")
 
-	emb1, emb2 = get_embeddings(embed)
-	before_align = time.time()
-	if args.numtop == 0:
-		args.numtop = None
-	alignment_matrix = get_embedding_similarities(emb1, emb2, num_top = None)#args.numtop)
+    print("\n=== Learning Embeddings for Graph 2 ===")
+    start_time_2 = time.time()
+    emb2 = learn_representations_for_edgelist(args.input2, rep_method, attributes)
+    np.save(args.output2, emb2)
+    print(f"  Saved Graph 2 embedding to {args.output2}")
+    elapsed2 = time.time() - start_time_2
+    print(f"  Time for Graph 2 embedding: {elapsed2:.2f} seconds")
 
-	#Report scoring and timing
-	after_align = time.time()
-	total_time = after_align - before_align
-	print("Align time: "), total_time
+    # If requested, compute alignment matrix (similarities)
+    if args.align:
+        print("\n=== Computing Alignment between emb1 & emb2 ===")
+        align_start = time.time()
+        # By default, we compute the full pairwise similarities
+        # If your method needs partial similarity (num_top), you can pass that
+        alignment_matrix = get_embedding_similarities(emb1, emb2, sim_measure="euclidean", num_top=None)
+        align_time = time.time() - align_start
+        print("  Alignment matrix shape:", alignment_matrix.shape)
+        print(f"  Computed alignment in {align_time:.2f} seconds")
 
-	if true_alignments is not None:
-		topk_scores = [1]#,5,10,20,50]
-		for k in topk_scores:
-			score, correct_nodes = score_alignment_matrix(alignment_matrix, topk = k, true_alignments = true_alignments)
-			print("score top%d: %f" % (k, score))
-
-#Should take in a file with the input graph as edgelist (args.input)
-#Should save representations to args.output
-def learn_representations(args):
-	nx_graph = nx.read_edgelist(args.input, nodetype = int, comments="%")
-	print("read in graph")
-	adj = nx.adjacency_matrix(nx_graph, nodelist = range(nx_graph.number_of_nodes()) )
-	print("got adj matrix")
-	
-	graph = Graph(adj, node_attributes = args.attributes)
-	max_layer = args.untillayer
-	if args.untillayer == 0:
-		max_layer = None
-	alpha = args.alpha
-	num_buckets = args.buckets #BASE OF LOG FOR LOG SCALE
-	if num_buckets == 1:
-		num_buckets = None
-	rep_method = RepMethod(max_layer = max_layer, 
-							alpha = alpha, 
-							k = args.k, 
-							num_buckets = num_buckets, 
-							normalize = True, 
-							gammastruc = args.gammastruc, 
-							gammaattr = args.gammaattr)
-	if max_layer is None:
-		max_layer = 1000
-	print("Learning representations with max layer %d and alpha = %f" % (max_layer, alpha))
-	representations = xnetmf.get_representations(graph, rep_method)
-	np.save(args.output, representations)
-	return representations		
+        # If you have ground-truth node matches, you could call score_alignment_matrix here.
+        # e.g.: score_alignment_matrix(alignment_matrix, topk=1, true_alignments=...)
+    else:
+        print("\nNo alignment requested (--align not set). Done!")
 
 if __name__ == "__main__":
-	args = parse_args()
-	main(args)
+    args = parse_args()
+    main(args)
