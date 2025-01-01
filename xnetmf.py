@@ -212,7 +212,7 @@ if __name__ == "__main__":
 	else:
 		graph_file = sys.argv[1]
 	#nx_graph = nx.read_edgelist(graph_file, nodetype = int, comments="%")
-	nx_graph = nx.read_edgelist(graph_file, nodetype = float, comments="%")
+	nx_graph = nx.read_edgelist(graph_file, nodetype = str, comments="%")
 	adj_matrix = nx.adjacency_matrix(nx_graph).todense()
 	
 	graph = Graph(adj_matrix)
