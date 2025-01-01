@@ -14,7 +14,8 @@ def get_khop_neighbors(graph, rep_method):
 	#only 0-hop neighbor of a node is itself
 	#neighbors of a node have nonzero connections to it in adj matrix
 	for node in range(graph.N):
-		neighbors = np.nonzero(graph.G_adj[node])[1].tolist() ###
+		#neighbors = np.nonzero(graph.G_adj[node])[1].tolist() ###
+		neighbors = graph.G_adj[node, :].nonzero()[1].tolist()  # fixed line
 		if len(neighbors) == 0: #disconnected node
 			print("Warning: node %d is disconnected" % node)
 			kneighbors_dict[node] = {0: set([node]), 1: set()}
