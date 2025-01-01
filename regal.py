@@ -51,15 +51,15 @@ def main(args):
 		dataset_name = dataset_name[-2]
 
 	#Get true alignments
-	true_alignments_fname = args.input.split("_")[0] + "_edges-mapping-permutation.txt" #can be changed if desired
-	print("true alignments file: ", true_alignments_fname)
+	#true_alignments_fname = args.input.split("_")[0] + "_edges-mapping-permutation.txt" #can be changed if desired
+	#print("true alignments file: ", true_alignments_fname)
 	true_alignments = None
-	if os.path.exists(true_alignments_fname):
-		with open(true_alignments_fname, "rb") as true_alignments_file:
-			try:
-				true_alignments = pickle.load(true_alignments_file)
-			except:
-				true_alignments = pickle.load(true_alignments_file, encoding = "latin1")
+	#if os.path.exists(true_alignments_fname):
+	#	with open(true_alignments_fname, "rb") as true_alignments_file:
+	#		try:
+	#			true_alignments = pickle.load(true_alignments_file)
+	#		except:
+	#			true_alignments = pickle.load(true_alignments_file, encoding = "latin1")
 
 	#Load in attributes if desired (assumes they are numpy array)
 	if args.attributes is not None:
