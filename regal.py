@@ -95,9 +95,11 @@ def main(args):
 #Should take in a file with the input graph as edgelist (args.input)
 #Should save representations to args.output
 def learn_representations(args):
-	nx_graph = nx.read_edgelist(args.input, nodetype = int, comments="%")
+	nx_graph = nx.read_edgelist(args.input, nodetype=int, comments="%")
 	print("read in graph")
-	adj = nx.adjacency_matrix(nx_graph, nodelist = range(nx_graph.number_of_nodes()) )
+	adj = nx.adjacency_matrix(nx_graph, nodelist=sorted(nx_graph.nodes()))
+	#Fix discrepancy in successive node labels
+	#adj = nx.adjacency_matrix(nx_graph, nodelist = range(nx_graph.number_of_nodes()) )
 	print("got adj matrix")
 	
 	graph = Graph(adj, node_attributes = args.attributes)
