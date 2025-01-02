@@ -6,7 +6,7 @@ from sklearn.neighbors import KDTree
 import scipy.sparse as sp
 from scipy.spatial.distance import cosine
 
-def get_embedding_similarities(embed, embed2 = None, sim_measure = "euclidean", num_top = None):
+def get_embedding_similarities(embed, embed2, sim_measure = "euclidean", num_top = None):
 	n_nodes, dim = embed.shape
 	if embed2 is None:
 		embed2 = embed
