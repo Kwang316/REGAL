@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import sys
 import os
-from alignment import get_embedding_similarities
+from alignments import get_embedding_similarities
 # ^ We'll assume you’ve put that def in a separate file or inline
 
 def parse_args():
